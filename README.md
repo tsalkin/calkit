@@ -40,7 +40,7 @@ google_template_url(
     *, summary, start, end, details=None, location=None,
 ) -> str                         # Google Calendar "add event" link
 
-# --- Apple Reminders via Shortcuts (pure strings, no network) ---
+# --- Apple Reminders via Shortcuts (pure strings/bytes, no network) ---
 
 shortcuts_reminder_url(
     *, name, title, due=None, notes=None, url=None,
@@ -51,7 +51,17 @@ detect_apple(user_agent) -> AppleDevice         # UA -> platform guess
 reminder_entry_mode(user_agent) -> str          # "apple" | "unknown"
 reminder_landing_html(
     *, shortcut_url, mode, lang="ru", labels=None,
-) -> str                         # optional self-contained landing page
+) -> str                         # per-task self-contained landing page
+
+# First-run setup (prepare the Shortcut once)
+build_reminder_shortcut(*, name="Add Reminder") -> bytes   # unsigned .shortcut plist
+write_reminder_shortcut(path, *, name="Add Reminder") -> None
+reminder_setup_instructions(
+    *, lang="ru", source="untrusted",
+) -> list[str]                   # ordered first-run steps ("untrusted"|"icloud")
+reminder_setup_html(
+    *, install_url, source="icloud", lang="ru", labels=None, mode=None,
+) -> str                         # self-contained first-run setup page
 ```
 
 Convenience dataclasses `Event`, `Alarm`, and `AppleDevice` are also exported.
@@ -168,10 +178,11 @@ functions — no network, no auth).
 
 ### Mechanics
 
-1. **One-time setup (per user).** The project ships one Shortcut, installed via
-   an iCloud share link (`https://www.icloud.com/shortcuts/...`). The user taps
-   it once to add it. The Shortcut is built to read its dictionary *input* and
-   create a Reminder from a **fixed set of keys**.
+1. **One-time setup (first run, per user).** The user installs one Shortcut
+   that reads its dictionary *input* and creates a Reminder from a **fixed set
+   of keys**. There are two install sources — see
+   [First-run setup](#first-run-setup-preparing-the-shortcut) below. `calkit`
+   can generate the setup material for either.
 2. **Per-task launch.** For each task the project builds a
    `shortcuts://run-shortcut?name=<Shortcut name>&input=<JSON>` URL with
    `shortcuts_reminder_url(...)` and opens it on the Apple device. The Shortcut
@@ -210,6 +221,84 @@ link = shortcuts_reminder_url(
 
 `name` and the JSON `input` are fully URL-escaped; the JSON is compact and
 `ensure_ascii=False`, so non-ASCII text stays readable before percent-encoding.
+
+### First-run setup (preparing the Shortcut)
+
+Per-task launch (above) only works once the Shortcut is installed. `calkit`
+carries the **first-run onboarding** as a library concern, so a project does
+not assemble the Shortcut or the setup page by hand.
+
+**Honest Apple limit — read this first.** An Apple-**signed** iCloud share link
+(`https://www.icloud.com/shortcuts/...`) **cannot be generated from code** — the
+signature is minted on Apple's side. So there are two install sources:
+
+| source        | how it's obtained                                             | user friction on device                                                             | recommendation           |
+| ------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------ |
+| `"untrusted"` | **`build_reminder_shortcut()`** generates an unsigned `.shortcut` | must enable **"Allow Untrusted Shortcuts"** in Settings + run it **once manually** to grant Reminders access | self-contained fallback  |
+| `"icloud"`    | a human publishes the Shortcut once and pastes its iCloud link | none — tap to add                                                                    | **recommended for prod** |
+
+The first-run onboarding works with either source; you pick which via the
+`source` argument and the `install_url` you pass.
+
+> ⚠️ **The generated `.shortcut` is not verified on a physical Apple device.**
+> `build_reminder_shortcut()` emits a valid binary property list using Apple's
+> documented action identifiers (`is.workflow.actions.detect.dictionary`,
+> `is.workflow.actions.getvalueforkey`, `is.workflow.actions.addnewreminder`)
+> and the standard magic-variable serialization, but the exact runtime wiring
+> (due-date alarm, notes concatenation) has **not** been round-tripped on a real
+> device — treat the first on-device import as a one-time validation step.
+
+**(A) built-in unsigned `.shortcut`:**
+
+```python
+from calkit import build_reminder_shortcut, write_reminder_shortcut
+
+data = build_reminder_shortcut(name="Add Reminder")   # -> bytes (binary plist)
+write_reminder_shortcut("add-reminder.shortcut", name="Add Reminder")
+# Serve `data` from an endpoint, or attach the file. Then point the setup
+# page's install button at that download URL with source="untrusted".
+```
+
+**Setup page and steps** (works for either source):
+
+```python
+from calkit import (
+    reminder_setup_instructions,
+    reminder_setup_html,
+    reminder_entry_mode,
+)
+
+# Plain ordered steps (render however you like):
+steps = reminder_setup_instructions(lang="ru", source="untrusted")
+
+# Or a full self-contained page: numbered steps + an "Install" button on
+# install_url + a "I've installed it -> continue" hook (id="reminder-continue",
+# which your app wires to its next step). Pass mode="unknown" to warn a
+# non-Apple visitor; an inline script re-checks the client (incl. iPadOS
+# masquerade via maxTouchPoints).
+mode = reminder_entry_mode(request.headers.get("User-Agent"))
+html = reminder_setup_html(
+    install_url="https://www.icloud.com/shortcuts/abc123",  # signed iCloud link
+    source="icloud",
+    lang="ru",
+    mode=mode,
+)
+```
+
+**Whether the Shortcut is already installed is state the project owns.** The
+library does not track it. Your flow is: on a user's first reminder, show
+`reminder_setup_html(...)`; once they confirm install (your "continue" hook),
+remember that and from then on go straight to the per-task
+`reminder_landing_html(...)` + `shortcuts_reminder_url(...)` path.
+
+Full first-run → per-task flow:
+
+1. **First run:** user has no Shortcut yet → render `reminder_setup_html(...)`
+   with your chosen `source`/`install_url`; user installs it and taps continue;
+   your project records "installed".
+2. **Per task, thereafter:** build the launch URL with
+   `shortcuts_reminder_url(...)` and hand it to the user via
+   `reminder_landing_html(...)` (or your own UI).
 
 ### Telegram nuance
 

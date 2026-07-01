@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 # is not already taken. If it is, rename the distribution here (keep the
 # import name `calkit`).
 name = "calkit"
-version = "0.2.0"
+version = "0.3.0"
 description = "Framework-agnostic iCalendar (.ics) generation: data in, RFC 5545 bytes out."
 readme = "README.md"
 requires-python = ">=3.10"

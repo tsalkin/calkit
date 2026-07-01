@@ -4,6 +4,39 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-07-01
+
+### Added
+- First-run Shortcut onboarding, moved into the library so projects no longer
+  assemble the Shortcut or the setup page by hand:
+  - `build_reminder_shortcut(*, name="Add Reminder") -> bytes` — generate an
+    **unsigned** `.shortcut` file (binary property list via `plistlib`,
+    `FMT_BINARY`) whose workflow parses the JSON input into a dictionary
+    (`is.workflow.actions.detect.dictionary`), reads the fixed keys
+    `title`/`due`/`notes`/`url` (`is.workflow.actions.getvalueforkey`), and adds
+    a Reminder (`is.workflow.actions.addnewreminder`) with
+    `notes = notes + "\n" + url` and a due alarm from `due`. Payload keys match
+    `shortcuts_reminder_url`.
+  - `write_reminder_shortcut(path, *, name="Add Reminder") -> None` — write that
+    plist to a file.
+  - `reminder_setup_instructions(*, lang="ru", source="untrusted") -> list[str]`
+    — ordered first-run steps for `source` ∈ {`"untrusted"`, `"icloud"`}, RU/EN.
+  - `reminder_setup_html(*, install_url, source="icloud", lang="ru",
+    labels=None, mode=None) -> str` — self-contained setup page: numbered steps
+    + "Install the Shortcut" button on `install_url` + an "I've installed it →
+    continue" hook; reuses the Apple detection/warning + client re-check
+    (`maxTouchPoints`) from `reminder_landing_html`; escaped interpolation;
+    `labels` overrides.
+
+### Notes
+- **Honest Apple limit:** an Apple-*signed* iCloud share link cannot be minted
+  from code (signing is on Apple's side). Hence two install sources — an unsigned
+  built-in `.shortcut` (requires "Allow Untrusted Shortcuts" + a one-time manual
+  run) and a signed iCloud link published once by a human (recommended for prod).
+- The generated `.shortcut` uses documented action identifiers and standard
+  magic-variable serialization but has **not** been round-trip verified on a
+  physical Apple device; treat the first on-device import as a validation step.
+
 ## [0.2.0] - 2026-07-01
 
 ### Added

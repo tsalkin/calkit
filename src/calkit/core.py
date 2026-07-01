@@ -26,7 +26,7 @@ __all__ = [
     "google_template_url",
 ]
 
-PRODID = "-//calkit//calkit 0.2.0//EN"
+PRODID = "-//calkit//calkit 0.3.0//EN"
 
 # A "when" is either a timezone-aware/naive datetime (timed event) or a
 # plain date (all-day event).

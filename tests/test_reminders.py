@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import plistlib
 from urllib.parse import parse_qs, unquote, urlparse
 from zoneinfo import ZoneInfo
 
@@ -11,10 +12,14 @@ import pytest
 
 from calkit import (
     AppleDevice,
+    build_reminder_shortcut,
     detect_apple,
     reminder_entry_mode,
     reminder_landing_html,
+    reminder_setup_html,
+    reminder_setup_instructions,
     shortcuts_reminder_url,
+    write_reminder_shortcut,
 )
 
 
@@ -300,3 +305,166 @@ def test_landing_has_client_detection_script():
     assert "<script>" in html
     assert "navigator" in html
     assert "maxTouchPoints" in html  # iPadOS-masquerade handling
+
+
+# --------------------------------------------------------------------------- #
+# build_reminder_shortcut / write_reminder_shortcut
+# --------------------------------------------------------------------------- #
+
+_REQUIRED_ACTION_IDS = {
+    "is.workflow.actions.detect.dictionary",
+    "is.workflow.actions.getvalueforkey",
+    "is.workflow.actions.addnewreminder",
+}
+
+
+def test_build_reminder_shortcut_parses_as_plist():
+    data = build_reminder_shortcut()
+    assert isinstance(data, bytes)
+    wf = plistlib.loads(data)
+    assert isinstance(wf, dict)
+    assert "WFWorkflowActions" in wf
+    assert isinstance(wf["WFWorkflowActions"], list)
+
+
+def test_build_reminder_shortcut_has_required_action_ids():
+    wf = plistlib.loads(build_reminder_shortcut())
+    ids = {a["WFWorkflowActionIdentifier"] for a in wf["WFWorkflowActions"]}
+    assert _REQUIRED_ACTION_IDS <= ids
+
+
+def test_build_reminder_shortcut_extracts_fixed_keys():
+    wf = plistlib.loads(build_reminder_shortcut())
+    keys = {
+        a["WFWorkflowActionParameters"].get("WFDictionaryKey")
+        for a in wf["WFWorkflowActions"]
+        if a["WFWorkflowActionIdentifier"] == "is.workflow.actions.getvalueforkey"
+    }
+    # Must extract exactly the fixed payload contract keys.
+    assert keys == {"title", "due", "notes", "url"}
+
+
+def test_build_reminder_shortcut_name_embedded():
+    wf = plistlib.loads(build_reminder_shortcut(name="My Reminder Adder"))
+    assert wf["WFWorkflowName"] == "My Reminder Adder"
+
+
+def test_build_reminder_shortcut_is_binary_plist():
+    data = build_reminder_shortcut()
+    # FMT_BINARY plists start with the "bplist" magic.
+    assert data[:6] == b"bplist"
+
+
+def test_write_reminder_shortcut_writes_file(tmp_path):
+    path = tmp_path / "add-reminder.shortcut"
+    write_reminder_shortcut(str(path), name="Add Reminder")
+    assert path.exists()
+    wf = plistlib.loads(path.read_bytes())
+    assert wf["WFWorkflowName"] == "Add Reminder"
+    ids = {a["WFWorkflowActionIdentifier"] for a in wf["WFWorkflowActions"]}
+    assert _REQUIRED_ACTION_IDS <= ids
+
+
+# --------------------------------------------------------------------------- #
+# reminder_setup_instructions
+# --------------------------------------------------------------------------- #
+
+def test_setup_instructions_ru_untrusted_nonempty():
+    steps = reminder_setup_instructions(lang="ru", source="untrusted")
+    assert isinstance(steps, list) and steps
+    assert all(isinstance(s, str) and s for s in steps)
+    # Untrusted path must mention the "untrusted" toggle.
+    assert any("ненадёжны" in s.lower() for s in steps)
+
+
+def test_setup_instructions_ru_icloud_nonempty():
+    steps = reminder_setup_instructions(lang="ru", source="icloud")
+    assert steps and all(s for s in steps)
+    assert any("iCloud" in s for s in steps)
+
+
+def test_setup_instructions_en_both_sources_nonempty():
+    for source in ("untrusted", "icloud"):
+        steps = reminder_setup_instructions(lang="en", source=source)
+        assert steps and all(isinstance(s, str) and s for s in steps)
+
+
+def test_setup_instructions_unknown_lang_falls_back_to_en():
+    steps = reminder_setup_instructions(lang="fr", source="icloud")
+    assert steps == reminder_setup_instructions(lang="en", source="icloud")
+
+
+def test_setup_instructions_invalid_source_raises():
+    with pytest.raises(ValueError):
+        reminder_setup_instructions(source="bogus")
+
+
+# --------------------------------------------------------------------------- #
+# reminder_setup_html
+# --------------------------------------------------------------------------- #
+
+def test_setup_html_has_install_url_and_buttons():
+    html = reminder_setup_html(install_url="https://example.com/s.shortcut")
+    assert "<html" in html and "</html>" in html
+    # Install button points at install_url.
+    assert 'id="reminder-install"' in html
+    assert "https://example.com/s.shortcut" in html
+    # Continue hook present.
+    assert 'id="reminder-continue"' in html
+    assert "продолжить" in html.lower()
+    # Numbered steps rendered.
+    assert "<ol" in html and "<li>" in html
+
+
+def test_setup_html_renders_source_specific_steps():
+    html = reminder_setup_html(
+        install_url="https://x", source="untrusted", lang="ru"
+    )
+    assert "ненадёжны" in html.lower()
+
+
+def test_setup_html_unknown_mode_shows_warning():
+    html = reminder_setup_html(install_url="https://x", mode="unknown")
+    assert "не обнаружено" in html
+    # Warning block visible (no inline hide style) in unknown mode.
+    assert '<div class="warning" id="reminder-warning" style="">' in html
+    # Client re-check script present with iPadOS masquerade handling.
+    assert "navigator" in html
+    assert "maxTouchPoints" in html
+
+
+def test_setup_html_default_mode_hides_warning():
+    html = reminder_setup_html(install_url="https://x")
+    assert "display:none;" in html  # warning hidden when mode is None
+
+
+def test_setup_html_lang_en():
+    html = reminder_setup_html(
+        install_url="https://x", source="icloud", lang="en"
+    )
+    assert "Install the Shortcut" in html
+    assert "continue" in html.lower()
+
+
+def test_setup_html_labels_override():
+    html = reminder_setup_html(
+        install_url="https://x",
+        labels={"install": "GRAB IT", "title": "SETUP TITLE"},
+    )
+    assert "GRAB IT" in html
+    assert "SETUP TITLE" in html
+
+
+def test_setup_html_escapes_injected_values():
+    html = reminder_setup_html(
+        install_url='https://x"><script>alert(1)</script>',
+        mode="unknown",
+    )
+    assert "<script>alert(1)</script>" not in html
+    assert "&lt;script&gt;" in html
+    html2 = reminder_setup_html(
+        install_url="https://x",
+        labels={"title": "<b>hi</b>"},
+    )
+    assert "<b>hi</b>" not in html2
+    assert "&lt;b&gt;hi&lt;/b&gt;" in html2

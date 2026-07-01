@@ -7,11 +7,15 @@ Public API:
     build_calendar(events)  -> bytes   # many VEVENTs in a VCALENDAR
     google_template_url(...) -> str    # Google Calendar "add event" link
 
-Apple Reminders via Shortcuts (pure strings, no network):
-    shortcuts_reminder_url(...) -> str        # shortcuts:// launch URL
-    detect_apple(user_agent)    -> AppleDevice
-    reminder_entry_mode(ua)     -> str        # "apple" | "unknown"
-    reminder_landing_html(...)  -> str        # optional landing page
+Apple Reminders via Shortcuts (pure strings/bytes, no network):
+    shortcuts_reminder_url(...)     -> str        # shortcuts:// launch URL
+    detect_apple(user_agent)        -> AppleDevice
+    reminder_entry_mode(ua)         -> str        # "apple" | "unknown"
+    reminder_landing_html(...)      -> str        # per-task landing page
+    build_reminder_shortcut(...)    -> bytes      # unsigned .shortcut plist
+    write_reminder_shortcut(...)    -> None       # write that plist to a file
+    reminder_setup_instructions(...) -> list[str] # first-run steps
+    reminder_setup_html(...)        -> str        # first-run setup page
 
 Convenience dataclasses:
     Event, Alarm, AppleDevice
@@ -28,10 +32,14 @@ from .core import (
 )
 from .reminders import (
     AppleDevice,
+    build_reminder_shortcut,
     detect_apple,
     reminder_entry_mode,
     reminder_landing_html,
+    reminder_setup_html,
+    reminder_setup_instructions,
     shortcuts_reminder_url,
+    write_reminder_shortcut,
 )
 
 __all__ = [
@@ -40,11 +48,15 @@ __all__ = [
     "Event",
     "build_calendar",
     "build_event",
+    "build_reminder_shortcut",
     "detect_apple",
     "google_template_url",
     "reminder_entry_mode",
     "reminder_landing_html",
+    "reminder_setup_html",
+    "reminder_setup_instructions",
     "shortcuts_reminder_url",
+    "write_reminder_shortcut",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
