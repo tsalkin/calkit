@@ -39,9 +39,22 @@ build_calendar(events) -> bytes  # many Event objects -> one VCALENDAR
 google_template_url(
     *, summary, start, end, details=None, location=None,
 ) -> str                         # Google Calendar "add event" link
+
+# --- Apple Reminders via Shortcuts (pure strings, no network) ---
+
+shortcuts_reminder_url(
+    *, name, title, due=None, notes=None, url=None,
+    tz="UTC", shortcut_input_extra=None,
+) -> str                         # shortcuts://run-shortcut launch URL
+
+detect_apple(user_agent) -> AppleDevice         # UA -> platform guess
+reminder_entry_mode(user_agent) -> str          # "apple" | "unknown"
+reminder_landing_html(
+    *, shortcut_url, mode, lang="ru", labels=None,
+) -> str                         # optional self-contained landing page
 ```
 
-Convenience dataclasses `Event` and `Alarm` are also exported.
+Convenience dataclasses `Event`, `Alarm`, and `AppleDevice` are also exported.
 
 ## Quick example
 
@@ -145,6 +158,106 @@ gcal = google_template_url(
     location="Main St 5",
 )
 ```
+
+## Apple Reminders (Shortcuts)
+
+Apple has no public URL scheme to create a **Reminders** task directly, but the
+**Shortcuts** app does: a shortcut can receive a dictionary as *input* and add a
+Reminder from it. `calkit` supplies the string plumbing for that flow (pure
+functions — no network, no auth).
+
+### Mechanics
+
+1. **One-time setup (per user).** The project ships one Shortcut, installed via
+   an iCloud share link (`https://www.icloud.com/shortcuts/...`). The user taps
+   it once to add it. The Shortcut is built to read its dictionary *input* and
+   create a Reminder from a **fixed set of keys**.
+2. **Per-task launch.** For each task the project builds a
+   `shortcuts://run-shortcut?name=<Shortcut name>&input=<JSON>` URL with
+   `shortcuts_reminder_url(...)` and opens it on the Apple device. The Shortcut
+   receives the JSON and creates the Reminder.
+
+### Fixed payload keys (build your Shortcut against these)
+
+The JSON passed as `input` always carries these keys, so your Shortcut has a
+stable contract:
+
+| key     | type        | meaning                                   |
+| ------- | ----------- | ----------------------------------------- |
+| `title` | `str`       | reminder title                            |
+| `due`   | `str\|null` | ISO-8601 due date/time (offset if aware)  |
+| `notes` | `str\|null` | free-text notes                           |
+| `url`   | `str\|null` | associated link                           |
+
+Extra fields can be merged in via `shortcut_input_extra` (e.g. a target list
+name or priority) without breaking the fixed keys.
+
+```python
+import datetime as dt
+from calkit import shortcuts_reminder_url
+
+link = shortcuts_reminder_url(
+    name="Add Reminder",                       # the installed Shortcut's name
+    title="Call the dentist",
+    due=dt.datetime(2026, 7, 1, 15, 0),        # naive -> localized to tz below
+    notes="Bring the insurance card.",
+    url="https://example.com/booking/42",
+    tz="Europe/Berlin",
+    shortcut_input_extra={"list": "Personal"}, # optional extra fields
+)
+# shortcuts://run-shortcut?name=Add%20Reminder&input=%7B%22title%22%3A...%7D
+```
+
+`name` and the JSON `input` are fully URL-escaped; the JSON is compact and
+`ensure_ascii=False`, so non-ASCII text stays readable before percent-encoding.
+
+### Telegram nuance
+
+Telegram **inline buttons reject custom schemes** like `shortcuts://` — they
+only accept `http(s)://`. So don't put the `shortcuts://` URL on an inline
+button directly. Instead, host a small **https landing page** and link the
+button there; the landing page carries the `shortcuts://` link as a normal
+anchor the user taps. `reminder_landing_html(...)` renders exactly such a page.
+
+### Auto-detection and two UX states
+
+`detect_apple(user_agent)` classifies the visitor's `User-Agent` into an
+`AppleDevice(is_apple, kind)` where `kind` is one of
+`iphone`/`ipad`/`ipod`/`mac`/`unknown`. `reminder_entry_mode(user_agent)`
+collapses that to `"apple"` or `"unknown"`.
+
+> Limitation: iPadOS Safari can masquerade as `Macintosh`, so a modern iPad may
+> report `kind="mac"` — still `is_apple=True`, which is all this flow needs.
+
+`reminder_landing_html(...)` renders a self-contained, dependency-free page with
+two states:
+
+- **`mode="apple"`** — Apple detected: shows the action as an explicit tool, a
+  prominent "📋 Добавить в Напоминания" button linking to the `shortcuts://` URL.
+- **`mode="unknown"`** — not detected: shows the **same button as an option**
+  plus a warning that it only works on an Apple device, and the user may
+  continue if they are on one.
+
+An inline `<script>` re-checks `navigator` on the client (more accurate than the
+server's UA guess, and handles the iPadOS masquerade via `maxTouchPoints`); if
+it finds Apple, it flips an `unknown` page into the explicit-tool state. Default
+texts ship for `lang="ru"` and `lang="en"`; `labels` overrides any string.
+
+```python
+from calkit import reminder_entry_mode, shortcuts_reminder_url, reminder_landing_html
+
+mode = reminder_entry_mode(request.headers.get("User-Agent"))
+link = shortcuts_reminder_url(name="Add Reminder", title="Call the dentist")
+html = reminder_landing_html(shortcut_url=link, mode=mode, lang="ru")
+# return `html` as text/html from your web handler
+```
+
+`reminder_landing_html` is an **optional convenience helper** — a project can
+render its own UI using `reminder_entry_mode` + `shortcuts_reminder_url`.
+
+> **Scope:** this path is Apple-only. For non-Apple users, fall back to a
+> calendar reminder (`build_event(...)` with a `VALARM`, or
+> `google_template_url(...)`) or another task-provider integration.
 
 ## Cross-platform notes
 
