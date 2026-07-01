@@ -5,6 +5,7 @@ Pure data in, RFC 5545 bytes out. No web/bot framework dependencies.
 Public API:
     build_event(...)        -> bytes   # one VEVENT in a VCALENDAR
     build_calendar(events)  -> bytes   # many VEVENTs in a VCALENDAR
+    build_todo(...)         -> bytes   # one VTODO (task) in a VCALENDAR
     google_template_url(...) -> str    # Google Calendar "add event" link
 
 Apple Reminders via Shortcuts (pure strings/bytes, no network):
@@ -28,6 +29,7 @@ from .core import (
     Event,
     build_calendar,
     build_event,
+    build_todo,
     google_template_url,
 )
 from .reminders import (
@@ -48,6 +50,7 @@ __all__ = [
     "Event",
     "build_calendar",
     "build_event",
+    "build_todo",
     "build_reminder_shortcut",
     "detect_apple",
     "google_template_url",
@@ -59,4 +62,4 @@ __all__ = [
     "write_reminder_shortcut",
 ]
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

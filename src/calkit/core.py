@@ -17,16 +17,23 @@ from zoneinfo import ZoneInfo
 from icalendar import Alarm as _ICalAlarm
 from icalendar import Calendar as _ICalCalendar
 from icalendar import Event as _ICalEvent
+from icalendar import Todo as _ICalTodo
 
 __all__ = [
     "Alarm",
     "Event",
     "build_calendar",
     "build_event",
+    "build_todo",
     "google_template_url",
 ]
 
-PRODID = "-//calkit//calkit 0.3.0//EN"
+PRODID = "-//calkit//calkit 0.4.0//EN"
+
+# Valid VTODO STATUS values per RFC 5545 (section 3.8.1.11).
+_TODO_STATUSES = frozenset(
+    {"NEEDS-ACTION", "IN-PROCESS", "COMPLETED", "CANCELLED"}
+)
 
 # A "when" is either a timezone-aware/naive datetime (timed event) or a
 # plain date (all-day event).
@@ -233,6 +240,109 @@ def build_calendar(events: Iterable[Event]) -> bytes:
     cal = _new_calendar()
     for ev in events:
         cal.add_component(_build_vevent(ev))
+    return _finalize(cal)
+
+
+def build_todo(
+    *,
+    summary: str,
+    due: Optional[When] = None,
+    start: Optional[When] = None,
+    all_day: bool = False,
+    tz: str = "UTC",
+    location: Optional[str] = None,
+    url: Optional[str] = None,
+    description: Optional[str] = None,
+    alarms: Sequence[Union[Alarm, _dt.timedelta]] = (),
+    priority: Optional[int] = None,
+    status: Optional[str] = None,
+    uid: Optional[str] = None,
+) -> bytes:
+    """Build a VCALENDAR containing a single VTODO and return ``.ics`` bytes.
+
+    The task counterpart of :func:`build_event`: same timezone handling,
+    URL-in-description behaviour, and VALARM support, but emits a VTODO
+    component with task-specific properties (DUE, PRIORITY, STATUS).
+
+    Args:
+        summary: Task title.
+        due: Optional due datetime (or date when ``all_day``) -> DUE.
+        start: Optional start datetime (or date when ``all_day``) -> DTSTART.
+        all_day: If True, emit dates using VALUE=DATE instead of datetimes.
+        tz: IANA/zoneinfo timezone name applied to naive datetimes.
+        location: Optional location text.
+        url: Optional link, written to the URL property *and* appended to the
+            DESCRIPTION (some clients only render links from the description).
+        description: Optional description body.
+        alarms: Reminders as :class:`Alarm` objects or bare ``timedelta``
+            offsets (negative = before). Each becomes a VALARM with
+            ACTION=DISPLAY.
+        priority: Optional priority, integer 0-9 (0 = undefined, 1 = highest,
+            9 = lowest per RFC 5545). Out-of-range raises ``ValueError``.
+        status: Optional status, one of ``"NEEDS-ACTION"``, ``"IN-PROCESS"``,
+            ``"COMPLETED"``, ``"CANCELLED"``. Anything else raises
+            ``ValueError``.
+        uid: Optional UID; generated if omitted.
+
+    Returns:
+        RFC 5545 ``.ics`` content as bytes.
+    """
+    if priority is not None and not (0 <= priority <= 9):
+        raise ValueError(
+            f"priority must be an integer 0-9, got {priority!r}"
+        )
+    if status is not None and status not in _TODO_STATUSES:
+        raise ValueError(
+            "status must be one of "
+            f"{sorted(_TODO_STATUSES)}, got {status!r}"
+        )
+
+    alarm_objs = [_coerce_alarm(a) for a in alarms]
+
+    vtodo = _ICalTodo()
+    vtodo.add("summary", summary)
+
+    if due is not None:
+        vtodo.add("due", _apply_tz(due, tz, all_day=all_day))
+
+    if start is not None:
+        vtodo.add("dtstart", _apply_tz(start, tz, all_day=all_day))
+
+    # Description: base text plus the URL appended, because some clients only
+    # surface links found inside the DESCRIPTION body.
+    description_parts = []
+    if description:
+        description_parts.append(description)
+    if url:
+        description_parts.append(url)
+    if description_parts:
+        vtodo.add("description", "\n\n".join(description_parts))
+
+    if location:
+        vtodo.add("location", location)
+
+    if url:
+        vtodo.add("url", url)
+
+    if priority is not None:
+        vtodo.add("priority", priority)
+
+    if status is not None:
+        vtodo.add("status", status)
+
+    uid_value = uid or f"{uuid4()}@calkit"
+    vtodo.add("uid", uid_value)
+    vtodo.add("dtstamp", _dt.datetime.now(tz=_dt.timezone.utc))
+
+    for alarm in alarm_objs:
+        valarm = _ICalAlarm()
+        valarm.add("action", "DISPLAY")
+        valarm.add("description", alarm.description)
+        valarm.add("trigger", alarm.trigger)
+        vtodo.add_component(valarm)
+
+    cal = _new_calendar()
+    cal.add_component(vtodo)
     return _finalize(cal)
 
 

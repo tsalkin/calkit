@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-07-01
+
+### Added
+- `build_todo(*, summary, due=None, start=None, all_day=False, tz="UTC",
+  location=None, url=None, description=None, alarms=(), priority=None,
+  status=None, uid=None) -> bytes` — build a VCALENDAR with a single **VTODO**
+  (task), returned as `.ics` bytes. Symmetric to `build_event`: same timezone
+  handling (zoneinfo + embedded `VTIMEZONE`), URL written to both the `URL`
+  property and the end of `DESCRIPTION`, and `VALARM` reminders from
+  `timedelta`/`Alarm` triggers. Task-specific properties: `DUE`, optional
+  `DTSTART`, `PRIORITY` (integer 0–9, out-of-range → `ValueError`), and `STATUS`
+  (`NEEDS-ACTION`/`IN-PROCESS`/`COMPLETED`/`CANCELLED`, anything else →
+  `ValueError`). All-day tasks emit `VALUE=DATE`. UID generated if omitted, plus
+  `DTSTAMP`. Exported from the package (`build_todo`).
+- **CI (GitHub Actions):** `.github/workflows/ci.yml` runs the test suite on
+  `push`/`pull_request` to `main` across Python 3.10, 3.11, 3.12, and 3.13.
+  CI badge added to the README.
+
 ## [0.3.0] - 2026-07-01
 
 ### Added

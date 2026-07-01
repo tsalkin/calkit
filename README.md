@@ -1,3 +1,5 @@
+![CI](https://github.com/tsalkin/calkit/actions/workflows/ci.yml/badge.svg)
+
 # calkit
 
 **Framework-agnostic Python toolkit for calendars and reminders — data in, RFC 5545 bytes out.**
@@ -5,7 +7,7 @@
 ## TL;DR
 
 `calkit` turns plain Python data into calendar and reminder artifacts: `.ics`
-files (`VEVENT`, `VTODO`-style tasks, `VALARM`, timezones), Google Calendar
+files (`VEVENT`, `VTODO` tasks, `VALARM`, timezones), Google Calendar
 "add event" links, and Apple Reminders via the Shortcuts app. It is **pure
 functions** — no aiogram, FastAPI, Telegram, network, auth, or secrets. The
 core *builds* strings and bytes; *how you deliver them* (a Telegram document, an
@@ -36,6 +38,10 @@ pip install -e ".[dev]"
 
 - **`.ics` generation** — single events (`build_event`) or whole calendars
   (`build_calendar`), returned as RFC 5545 bytes.
+- **Tasks (`VTODO`)** — `build_todo(...)` builds a real `VTODO` component with
+  `DUE`, optional `DTSTART`, `PRIORITY` (0–9), `STATUS`
+  (`NEEDS-ACTION`/`IN-PROCESS`/`COMPLETED`/`CANCELLED`), and `VALARM` reminders —
+  same timezone and URL handling as `build_event`.
 - **Timed & all-day events** — pass a `datetime` or a `date`; all-day emits
   `VALUE=DATE` with a correct exclusive `DTEND`.
 - **Timezones done right** — attach an IANA/zoneinfo name to naive datetimes;
@@ -64,6 +70,12 @@ build_event(
 ) -> bytes                       # one VEVENT inside a VCALENDAR
 
 build_calendar(events) -> bytes  # many Event objects -> one VCALENDAR
+
+build_todo(
+    *, summary, due=None, start=None, all_day=False, tz="UTC",
+    location=None, url=None, description=None, alarms=(),
+    priority=None, status=None, uid=None,
+) -> bytes                       # one VTODO (task) inside a VCALENDAR
 
 google_template_url(
     *, summary, start, end, details=None, location=None,
@@ -126,6 +138,27 @@ import datetime as dt
 from calkit import build_event
 
 ics = build_event(summary="Public holiday", start=dt.date(2026, 7, 4), all_day=True)
+```
+
+Task (`VTODO`) with a due date, priority, and a reminder:
+
+```python
+import datetime as dt
+from calkit import build_todo
+
+ics = build_todo(
+    summary="File quarterly taxes",
+    due=dt.datetime(2026, 7, 15, 17, 0),
+    tz="Europe/Berlin",
+    priority=1,                        # 0 = undefined, 1 = highest, 9 = lowest
+    status="NEEDS-ACTION",             # NEEDS-ACTION | IN-PROCESS | COMPLETED | CANCELLED
+    url="https://example.com/tax/q2",
+    description="Gather receipts first.",
+    alarms=[-dt.timedelta(days=1)],    # remind 1 day before due
+)
+
+with open("task.ics", "wb") as f:
+    f.write(ics)
 ```
 
 Multiple events in one calendar:
@@ -436,10 +469,10 @@ pytest
 
 ## Status
 
-**v0.3.0 — Beta.** The `.ics` core (`build_event`, `build_calendar`,
-`google_template_url`) and the Apple Reminders string plumbing are implemented
-and covered by tests (`pytest`, 61 passing). Public API is settled but may still
-change before 1.0.
+**v0.4.0 — Beta.** The `.ics` core (`build_event`, `build_calendar`,
+`build_todo`, `google_template_url`) and the Apple Reminders string plumbing are
+implemented and covered by tests (`pytest`, 72 passing, run on Python
+3.10–3.13 in CI). Public API is settled but may still change before 1.0.
 
 Known caveat: the generated unsigned `.shortcut` uses documented Apple action
 identifiers and standard magic-variable serialization but has **not** been

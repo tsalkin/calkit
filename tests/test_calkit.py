@@ -8,7 +8,14 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from icalendar import Calendar
 
-from calkit import Alarm, Event, build_calendar, build_event, google_template_url
+from calkit import (
+    Alarm,
+    Event,
+    build_calendar,
+    build_event,
+    build_todo,
+    google_template_url,
+)
 
 
 def _parse(ics: bytes) -> Calendar:
@@ -221,3 +228,133 @@ def test_invalid_alarm_type_raises():
             start=dt.datetime(2026, 7, 1, 9, 0),
             alarms=["not-an-alarm"],
         )
+
+
+# --- build_todo (VTODO) -----------------------------------------------------
+
+
+def _todos(cal: Calendar):
+    return [c for c in cal.walk("VTODO")]
+
+
+def test_build_todo_basic_roundtrip():
+    ics = build_todo(
+        summary="File taxes",
+        due=dt.datetime(2026, 7, 15, 17, 0),
+        tz="Europe/Berlin",
+    )
+    cal = _parse(ics)
+    assert cal.get("prodid")
+    assert str(cal.get("version")) == "2.0"
+
+    # Exactly one VTODO and no VEVENT.
+    todos = _todos(cal)
+    assert len(todos) == 1
+    assert _events(cal) == []
+
+    todo = todos[0]
+    assert str(todo.get("summary")) == "File taxes"
+    assert todo.get("due") is not None
+    assert todo.get("uid") is not None
+    assert todo.get("dtstamp") is not None
+
+
+def test_build_todo_priority_and_status():
+    ics = build_todo(
+        summary="Task",
+        due=dt.datetime(2026, 7, 15, 17, 0),
+        priority=1,
+        status="IN-PROCESS",
+    )
+    todo = _todos(_parse(ics))[0]
+    assert int(todo.get("priority")) == 1
+    assert str(todo.get("status")) == "IN-PROCESS"
+
+
+def test_build_todo_priority_out_of_range_raises():
+    with pytest.raises(ValueError):
+        build_todo(summary="X", priority=10)
+    with pytest.raises(ValueError):
+        build_todo(summary="X", priority=-1)
+
+
+def test_build_todo_invalid_status_raises():
+    with pytest.raises(ValueError):
+        build_todo(summary="X", status="DONE")
+
+
+def test_build_todo_status_boundary_values_accepted():
+    for status in ("NEEDS-ACTION", "IN-PROCESS", "COMPLETED", "CANCELLED"):
+        ics = build_todo(summary="X", status=status)
+        assert str(_todos(_parse(ics))[0].get("status")) == status
+
+
+def test_build_todo_valarm_trigger():
+    trigger = -dt.timedelta(hours=2)
+    ics = build_todo(
+        summary="Remind me",
+        due=dt.datetime(2026, 7, 15, 17, 0),
+        alarms=[trigger],
+    )
+    todo = _todos(_parse(ics))[0]
+    valarms = [c for c in todo.walk("VALARM")]
+    assert len(valarms) == 1
+    assert str(valarms[0].get("action")) == "DISPLAY"
+    assert valarms[0].get("trigger").dt == trigger
+
+
+def test_build_todo_url_in_both_url_and_description():
+    url = "https://example.com/task/7"
+    ics = build_todo(
+        summary="With link",
+        url=url,
+        description="Do the thing.",
+    )
+    todo = _todos(_parse(ics))[0]
+    assert str(todo.get("url")) == url
+    desc = str(todo.get("description"))
+    assert url in desc
+    assert "Do the thing." in desc
+
+
+def test_build_todo_all_day_uses_value_date():
+    ics = build_todo(
+        summary="Deadline",
+        due=dt.date(2026, 7, 15),
+        all_day=True,
+    )
+    text = ics.decode("utf-8")
+    assert "DUE;VALUE=DATE:20260715" in text
+    due = _todos(_parse(ics))[0].get("due").dt
+    assert isinstance(due, dt.date) and not isinstance(due, dt.datetime)
+
+
+def test_build_todo_timezone_applied():
+    ics = build_todo(
+        summary="TZ task",
+        due=dt.datetime(2026, 7, 15, 17, 0),
+        tz="Europe/Berlin",
+    )
+    due = _todos(_parse(ics))[0].get("due").dt
+    assert isinstance(due, dt.datetime)
+    assert due.tzinfo is not None
+    assert due.utcoffset() == dt.timedelta(hours=2)
+    assert any(c.name == "VTIMEZONE" for c in _parse(ics).walk())
+
+
+def test_build_todo_uid_generated_and_respected():
+    ics_auto = build_todo(summary="A")
+    assert str(_todos(_parse(ics_auto))[0].get("uid"))
+    ics_fixed = build_todo(summary="A", uid="todo-uid-9")
+    assert str(_todos(_parse(ics_fixed))[0].get("uid")) == "todo-uid-9"
+
+
+def test_build_todo_dtstart():
+    ics = build_todo(
+        summary="Spanning",
+        start=dt.datetime(2026, 7, 10, 9, 0),
+        due=dt.datetime(2026, 7, 15, 17, 0),
+        tz="UTC",
+    )
+    todo = _todos(_parse(ics))[0]
+    assert todo.get("dtstart") is not None
