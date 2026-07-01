@@ -1,16 +1,23 @@
 # calkit
 
-Framework-agnostic **iCalendar (`.ics`) generation** for Python.
+**Framework-agnostic Python toolkit for calendars and reminders — data in, RFC 5545 bytes out.**
 
-Data in, RFC 5545 bytes out. No dependency on aiogram, FastAPI, Telegram, or any
-web/bot framework — just pure functions that take event data and return `.ics`
-bytes. Reuse the same core from Telegram bots and web backends alike.
+## TL;DR
+
+`calkit` turns plain Python data into calendar and reminder artifacts: `.ics`
+files (`VEVENT`, `VTODO`-style tasks, `VALARM`, timezones), Google Calendar
+"add event" links, and Apple Reminders via the Shortcuts app. It is **pure
+functions** — no aiogram, FastAPI, Telegram, network, auth, or secrets. The
+core *builds* strings and bytes; *how you deliver them* (a Telegram document, an
+HTTP download, an inline button) stays in your project. Reuse the same core from
+a Telegram bot and a web backend alike.
 
 Built on the reliable [`icalendar`](https://pypi.org/project/icalendar/) library
 (BSD) for correct RFC 5545 serialization.
 
 - Python 3.10+
 - Typed (`py.typed` shipped)
+- Zero framework dependencies (only `icalendar`)
 - MIT licensed
 
 > **PyPI naming note:** the distribution name in `pyproject.toml` is `calkit`.
@@ -24,6 +31,28 @@ pip install calkit          # once published
 # or, from a local checkout:
 pip install -e ".[dev]"
 ```
+
+## Features
+
+- **`.ics` generation** — single events (`build_event`) or whole calendars
+  (`build_calendar`), returned as RFC 5545 bytes.
+- **Timed & all-day events** — pass a `datetime` or a `date`; all-day emits
+  `VALUE=DATE` with a correct exclusive `DTEND`.
+- **Timezones done right** — attach an IANA/zoneinfo name to naive datetimes;
+  the matching `VTIMEZONE` is embedded so the file is self-contained.
+- **`VALARM` reminders** — one or more display alarms from `timedelta` offsets or
+  `Alarm` objects.
+- **Google Calendar links** — `google_template_url(...)` gives Google users a
+  reliable path (Google ignores `VALARM` from imported `.ics`).
+- **Apple Reminders via Shortcuts** — pure string/bytes plumbing to drive Apple's
+  Shortcuts app into creating a Reminders task: a `shortcuts://` launch URL, a
+  fixed JSON payload contract, an unsigned `.shortcut` file builder, Apple
+  platform detection, and ready-made first-run onboarding + per-task landing
+  pages (RU/EN).
+- **No delivery lock-in** — the library never touches the network, auth, or
+  secrets. It hands you strings and bytes; delivery is yours.
+- **Typed and dependency-light** — ships `py.typed`; the only runtime dependency
+  is `icalendar`.
 
 ## Public API
 
@@ -348,6 +377,36 @@ render its own UI using `reminder_entry_mode` + `shortcuts_reminder_url`.
 > calendar reminder (`build_event(...)` with a `VALARM`, or
 > `google_template_url(...)`) or another task-provider integration.
 
+## Why / design
+
+**A framework-agnostic core: data → strings, nothing else.** The functions here
+take plain Python values and return `bytes` or `str`. They do not import a web or
+bot framework, open a socket, read an environment variable, or hold a secret.
+That is deliberate: the same `build_event(...)` powers a Telegram bot and a
+FastAPI endpoint without either dragging in the other's dependencies.
+
+**Generation is separated from delivery.** Building an `.ics` and *sending* it
+are different jobs with different failure modes. `calkit` owns the first and
+stays out of the second. It hands you the artifact; you decide whether it becomes
+a Telegram document, an HTTP response with a `Content-Disposition` header, or a
+file on disk. This keeps the tested surface small and pure, and lets delivery
+evolve (new transports, new frameworks) without touching generation.
+
+**Honest about platform limits.** Calendars have a universal file (`.ics`);
+tasks do not. There is no single file a user can open to create a task in *their*
+task manager, and an Apple-signed iCloud Shortcut link cannot be minted from code
+— signing happens on Apple's side. Rather than pretend otherwise, `calkit`
+models the real mechanics: `.ics` for calendars, `google_template_url` for Google,
+and a Shortcuts-based flow (with two honest install sources) for Apple Reminders.
+See [`docs/01-tasks-have-no-universal-file.md`](docs/01-tasks-have-no-universal-file.md)
+for the full reasoning.
+
+**First-run onboarding lives in the library, auth does not.** The fiddly,
+reusable parts of the Apple flow — the setup steps, the install page, the
+per-task landing page, platform detection — ship with `calkit` so projects don't
+reinvent them. Anything that needs a secret or an account (OAuth for a task
+provider, hosting a signed link) stays in the project, by design.
+
 ## Cross-platform notes
 
 Calendar clients differ in how they treat imported `.ics` files:
@@ -374,6 +433,20 @@ Calendar clients differ in how they treat imported `.ics` files:
 pip install -e ".[dev]"
 pytest
 ```
+
+## Status
+
+**v0.3.0 — Beta.** The `.ics` core (`build_event`, `build_calendar`,
+`google_template_url`) and the Apple Reminders string plumbing are implemented
+and covered by tests (`pytest`, 61 passing). Public API is settled but may still
+change before 1.0.
+
+Known caveat: the generated unsigned `.shortcut` uses documented Apple action
+identifiers and standard magic-variable serialization but has **not** been
+round-trip verified on a physical Apple device — treat the first on-device import
+as a one-time validation step.
+
+Not yet on PyPI (see the naming note above).
 
 ## License
 
