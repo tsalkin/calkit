@@ -358,3 +358,28 @@ def test_build_todo_dtstart():
     )
     todo = _todos(_parse(ics))[0]
     assert todo.get("dtstart") is not None
+
+
+def test_iso_string_inputs_parsed():
+    # build_event accepts ISO-8601 strings for start/end
+    ics = build_event(
+        summary="S",
+        start="2026-07-05T18:00:00+08:00",
+        end="2026-07-05T19:00:00+08:00",
+    )
+    dtstart = _events(_parse(ics))[0].get("dtstart").dt
+    assert isinstance(dtstart, dt.datetime)
+    assert dtstart.year == 2026 and dtstart.hour == 18
+
+    # a trailing Z (UTC) is handled (Python 3.10 compatibility)
+    ics_z = build_event(summary="Z", start="2026-07-05T10:00:00Z")
+    assert _events(_parse(ics_z))[0].get("dtstart").dt.tzinfo is not None
+
+    # build_todo accepts an ISO-8601 string due
+    ics_t = build_todo(summary="T", due="2026-07-05T18:00:00+08:00", priority=5)
+    assert _todos(_parse(ics_t))[0].get("due").dt.year == 2026
+
+    # an all-day date string yields VALUE=DATE
+    ics_d = build_event(summary="D", start="2026-07-05", all_day=True)
+    d = _events(_parse(ics_d))[0].get("dtstart").dt
+    assert isinstance(d, dt.date) and not isinstance(d, dt.datetime)

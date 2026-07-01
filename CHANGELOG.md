@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-07-01
+
+### Fixed
+- `build_event` / `build_todo`: accept **ISO-8601 strings** for `start` / `end`
+  / `due` (previously any string raised `AttributeError` in `_apply_tz`). A
+  trailing `Z` (UTC) is handled for Python 3.10 compatibility. `When` now
+  includes `str`.
+
 ## [0.4.0] - 2026-07-01
 
 ### Added

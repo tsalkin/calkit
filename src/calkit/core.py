@@ -28,16 +28,16 @@ __all__ = [
     "google_template_url",
 ]
 
-PRODID = "-//calkit//calkit 0.4.0//EN"
+PRODID = "-//calkit//calkit 0.4.1//EN"
 
 # Valid VTODO STATUS values per RFC 5545 (section 3.8.1.11).
 _TODO_STATUSES = frozenset(
     {"NEEDS-ACTION", "IN-PROCESS", "COMPLETED", "CANCELLED"}
 )
 
-# A "when" is either a timezone-aware/naive datetime (timed event) or a
-# plain date (all-day event).
-When = Union[_dt.datetime, _dt.date]
+# A "when" is either a timezone-aware/naive datetime (timed event), a
+# plain date (all-day event), or an ISO-8601 string that parses to one.
+When = Union[_dt.datetime, _dt.date, str]
 
 
 @dataclass(frozen=True)
@@ -85,8 +85,27 @@ def _coerce_alarm(a: Union[Alarm, _dt.timedelta]) -> Alarm:
     )
 
 
+def _parse_iso_when(value: str, *, all_day: bool) -> Union[_dt.datetime, _dt.date]:
+    """Parse an ISO-8601 string into a date (all-day) or datetime.
+
+    Handles a trailing ``Z`` (UTC) for Python 3.10 compatibility, where
+    ``datetime.fromisoformat`` does not accept it natively.
+    """
+    s = value.strip()
+    if all_day:
+        return _dt.date.fromisoformat(s[:10])
+    if s[-1:] in ("Z", "z"):
+        s = s[:-1] + "+00:00"
+    return _dt.datetime.fromisoformat(s)
+
+
 def _apply_tz(value: When, tz: str, *, all_day: bool) -> When:
-    """Attach timezone info to a datetime; pass dates through untouched."""
+    """Attach timezone info to a datetime; pass dates through untouched.
+
+    Accepts ISO-8601 strings and parses them first.
+    """
+    if isinstance(value, str):
+        value = _parse_iso_when(value, all_day=all_day)
     if all_day:
         # All-day events use a plain date. If a datetime was passed, take
         # its date component so icalendar emits VALUE=DATE.
